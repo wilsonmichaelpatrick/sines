@@ -49,12 +49,12 @@ struct sines_state {
     uint64_t start_sample;
     uint64_t fade_start_sample;
     uint64_t fade_end_sample;
-    char busy;
     float last_value;
     struct sines_parameters_and_state current_parameters_and_state;
     struct sines_parameters_and_state next_parameters_and_state;
     char next_parameters_and_state_flag;
 };
+
 void sines_trigger_bass(struct sines_state* s, float frequency,
                         float velocity, float amplitude_decay_constant) {
     s->next_parameters_and_state_flag = 1;
@@ -72,13 +72,6 @@ float sines_get_next_sample(struct sines_state* s) {
     if(s->samples_per_second == 0)
         return 0;
     
-    if(s->next_parameters_and_state_flag && !(s->busy)) {
-        s->current_parameters_and_state = s->next_parameters_and_state;
-        s->next_parameters_and_state_flag = 0;
-        s->start_sample = s->sample_num;
-        s->busy = (s->current_parameters_and_state.frequency > 0);
-    }
-    
     float value = 0;
     struct sines_parameters_and_state* p = &(s->current_parameters_and_state);
     float t = (s->sample_num - s->start_sample) / ((float)s->samples_per_second);
@@ -92,14 +85,23 @@ float sines_get_next_sample(struct sines_state* s) {
     s->last_value = value;
     
     if(period_complete && s->next_parameters_and_state_flag) {
-        if(s->fade_end_sample == UINT64_DISTANT_FUTURE) {
+        if(s->fade_end_sample != UINT64_DISTANT_FUTURE ||
+           s->next_parameters_and_state.frequency != 0) {
+            // We've finished the period since starting the fade OR
+            // we're going directly into another note so we don't
+            // need to do a fade at all.
+            s->fade_end_sample = UINT64_DISTANT_FUTURE;
+            s->current_parameters_and_state = s->next_parameters_and_state;
+            s->next_parameters_and_state_flag = 0;
+            s->start_sample = s->sample_num;
+            value = 0; // Value is 0, because we are starting the new period
+            // from this point, and don't want to hear a little "pop" if we
+            // went above zero from the previous period and back to zero for
+            // the new one.
+        } else {
             // Initiate the one-period fade
             s->fade_start_sample = s->sample_num;
             s->fade_end_sample = s->fade_start_sample + s->samples_per_second / p->frequency;
-        } else {
-            // We've finished the period since starting the fade...
-            s->busy = 0;
-            s->fade_end_sample = UINT64_DISTANT_FUTURE;
         }
     }
     float fade = 1.0;
@@ -131,7 +133,6 @@ struct sines_state* sines_alloc(uint64_t samples_per_second) {
         s->sample_num = 0;
         s->start_sample = 0;
         s->last_value = 0;
-        s->busy = 0;
         s->fade_start_sample = s->fade_end_sample = UINT64_DISTANT_FUTURE;
         s->next_parameters_and_state_flag = 0;
         s->current_parameters_and_state.frequency = 0;
