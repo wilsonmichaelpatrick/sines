@@ -38,7 +38,7 @@
 #define CHECK_NEG_1_TO_POS_1(x) do { assert((x) >= -1.01); assert((x) <= 1.01); } while(0)
 
 struct sines_parameters_and_state {
-    float frequency_literal;
+    float frequency;
     float amplitude_decay_constant;
     float velocity;
 };
@@ -47,52 +47,24 @@ struct sines_state {
     uint64_t samples_per_second;
     uint64_t sample_num; // Relative to when playing starts, not absolute.
     uint64_t start_sample;
+    uint64_t fade_start_sample;
+    uint64_t fade_end_sample;
+    char busy;
     float last_value;
-    char wave_complete;
     struct sines_parameters_and_state current_parameters_and_state;
     struct sines_parameters_and_state next_parameters_and_state;
     char next_parameters_and_state_flag;
 };
-
-static float get_sine_wave_value(float t, float frequency, float amplitude_decay_constant,
-                                 float* envelope_out) {
-    *envelope_out = exp(-amplitude_decay_constant * t);
-    return (*envelope_out) * sin (2 * M_PI * t * frequency);
-}
-
-static float get_bass_value(struct sines_state* s, struct sines_parameters_and_state* p, float* envelope,
-                            char* wave_complete)
-{
-    float sps = (float)s->samples_per_second;
-    float value = 0;
-    *envelope = 0;
-    if(p->frequency_literal > 0) {
-        value = get_sine_wave_value
-        ((s->sample_num - s->start_sample) / sps, p->frequency_literal,
-         p->amplitude_decay_constant, envelope);
-        CHECK_0_TO_POS_1(*envelope);
-        B31E_CLAMP(*envelope, 0, 1);
-        CHECK_NEG_1_TO_POS_1(value);
-        B31E_CLAMP(value, -1, 1);
-    }
-    value *= (p->velocity);
-    (*envelope) *= (p->velocity);
-    *wave_complete = (s->last_value <= 0) && (value >= 0);
-    s->last_value = value;
-    return value;
-}
-
-void sines_trigger_bass(struct sines_state* s, float frequency_literal,
+void sines_trigger_bass(struct sines_state* s, float frequency,
                         float velocity, float amplitude_decay_constant) {
     s->next_parameters_and_state_flag = 1;
-    s->next_parameters_and_state.frequency_literal = frequency_literal;
+    s->next_parameters_and_state.frequency = frequency;
     s->next_parameters_and_state.velocity = velocity;
     s->next_parameters_and_state.amplitude_decay_constant = amplitude_decay_constant;
 }
 
 void sines_mute_bass(struct sines_state* s) {
-    s->next_parameters_and_state_flag = 1;
-    s->next_parameters_and_state.frequency_literal = 0;
+    sines_trigger_bass(s, 0, 0, 0);
 }
 
 float sines_get_next_sample(struct sines_state* s) {
@@ -100,14 +72,45 @@ float sines_get_next_sample(struct sines_state* s) {
     if(s->samples_per_second == 0)
         return 0;
     
-    if(s->next_parameters_and_state_flag && s->wave_complete) {
+    if(s->next_parameters_and_state_flag && !(s->busy)) {
         s->current_parameters_and_state = s->next_parameters_and_state;
         s->next_parameters_and_state_flag = 0;
         s->start_sample = s->sample_num;
+        s->busy = (s->current_parameters_and_state.frequency > 0);
     }
     
-    float bass_envelope = 0;
-    float value = get_bass_value(s, &(s->current_parameters_and_state), &bass_envelope, &(s->wave_complete));
+    float value = 0;
+    struct sines_parameters_and_state* p = &(s->current_parameters_and_state);
+    float t = (s->sample_num - s->start_sample) / ((float)s->samples_per_second);
+    if(p->frequency > 0) {
+        value = exp(-p->amplitude_decay_constant * t) * sin (2 * M_PI * t * p->frequency);
+        CHECK_NEG_1_TO_POS_1(value);
+        B31E_CLAMP(value, -1, 1);
+    }
+    value *= (p->velocity);
+    char period_complete = (s->last_value <= 0) && (value >= 0);
+    s->last_value = value;
+    
+    if(period_complete && s->next_parameters_and_state_flag) {
+        if(s->fade_end_sample == UINT64_DISTANT_FUTURE) {
+            // Initiate the one-period fade
+            s->fade_start_sample = s->sample_num;
+            s->fade_end_sample = s->fade_start_sample + s->samples_per_second / p->frequency;
+        } else {
+            // We've finished the period since starting the fade...
+            s->busy = 0;
+            s->fade_end_sample = UINT64_DISTANT_FUTURE;
+        }
+    }
+    float fade = 1.0;
+    if(s->fade_end_sample != UINT64_DISTANT_FUTURE) {
+        fade = (1.0 -
+                ((float)(s->sample_num - s->fade_start_sample)) /
+                ((float)(s->fade_end_sample - s->fade_start_sample)));
+    }
+    CHECK_0_TO_POS_1(fade);
+    B31E_CLAMP(fade, 0, 1);
+    value *= fade;
     
     CHECK_NEG_1_TO_POS_1(value);
     B31E_CLAMP(value, -1, 1);
@@ -128,9 +131,10 @@ struct sines_state* sines_alloc(uint64_t samples_per_second) {
         s->sample_num = 0;
         s->start_sample = 0;
         s->last_value = 0;
-        s->wave_complete = 1;
+        s->busy = 0;
+        s->fade_start_sample = s->fade_end_sample = UINT64_DISTANT_FUTURE;
         s->next_parameters_and_state_flag = 0;
-        s->current_parameters_and_state.frequency_literal = 0;
+        s->current_parameters_and_state.frequency = 0;
         s->current_parameters_and_state.amplitude_decay_constant = 0;
         s->current_parameters_and_state.velocity = 1.0;
         s->next_parameters_and_state = s->current_parameters_and_state;
