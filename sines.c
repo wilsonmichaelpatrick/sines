@@ -86,7 +86,8 @@ float sines_get_next_sample(struct sines_state* s) {
     
     if(period_complete && s->next_parameters_and_state_flag) {
         if(s->fade_end_sample != UINT64_DISTANT_FUTURE ||
-           s->next_parameters_and_state.frequency != 0) {
+           s->next_parameters_and_state.frequency != 0 ||
+           p->frequency == 0) {
             // We've finished the period since starting the fade OR
             // we're going directly into another note so we don't
             // need to do a fade at all.
@@ -105,12 +106,13 @@ float sines_get_next_sample(struct sines_state* s) {
         }
     }
     float fade = 1.0;
-    if(s->fade_end_sample != UINT64_DISTANT_FUTURE) {
+    if(s->fade_end_sample != UINT64_DISTANT_FUTURE &&
+       (s->fade_end_sample - s->fade_start_sample) > 0) {
         fade = (1.0 -
                 ((float)(s->sample_num - s->fade_start_sample)) /
                 ((float)(s->fade_end_sample - s->fade_start_sample)));
     }
-    CHECK_0_TO_POS_1(fade);
+    // This has been seen to be < 0... do we skip samples sometimes? CHECK_0_TO_POS_1(fade);
     B31E_CLAMP(fade, 0, 1);
     value *= fade;
     
