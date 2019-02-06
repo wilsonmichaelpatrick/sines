@@ -41,6 +41,7 @@ struct sines_parameters_and_state {
     float frequency;
     float amplitude_decay_constant;
     float velocity;
+    uint64_t preferred_start_sample;
 };
 
 struct sines_state {
@@ -56,15 +57,18 @@ struct sines_state {
 };
 
 void sines_trigger_bass(struct sines_state* s, float frequency,
-                        float velocity, float amplitude_decay_constant) {
+                        float velocity, float amplitude_decay_constant,
+                        float trigger_delay_seconds) {
     s->next_parameters_and_state_flag = 1;
     s->next_parameters_and_state.frequency = frequency;
+    s->next_parameters_and_state.preferred_start_sample =
+    s->sample_num + s->samples_per_second * trigger_delay_seconds;
     s->next_parameters_and_state.velocity = velocity;
     s->next_parameters_and_state.amplitude_decay_constant = amplitude_decay_constant;
 }
 
 void sines_mute_bass(struct sines_state* s) {
-    sines_trigger_bass(s, 0, 0, 0);
+    sines_trigger_bass(s, 0, 0, 0, 0);
 }
 
 float sines_get_next_sample(struct sines_state* s) {
@@ -74,11 +78,11 @@ float sines_get_next_sample(struct sines_state* s) {
     
     float value = 0;
     struct sines_parameters_and_state* p = &(s->current_parameters_and_state);
-    float t = (s->sample_num - s->start_sample) / ((float)s->samples_per_second);
-    if(p->frequency > 0) {
+    if(s->start_sample <= s->sample_num && p->frequency > 0) {
+        float t = (s->sample_num - s->start_sample) / ((float)s->samples_per_second);
         value = exp(-p->amplitude_decay_constant * t) * sin (2 * M_PI * t * p->frequency);
         CHECK_NEG_1_TO_POS_1(value);
-        B31E_CLAMP(value, -1, 1);
+        SINES_CLAMP(value, -1, 1);
     }
     value *= (p->velocity);
     char period_complete = (s->last_value <= 0) && (value >= 0);
@@ -94,7 +98,10 @@ float sines_get_next_sample(struct sines_state* s) {
             s->fade_end_sample = UINT64_DISTANT_FUTURE;
             s->current_parameters_and_state = s->next_parameters_and_state;
             s->next_parameters_and_state_flag = 0;
-            s->start_sample = s->sample_num;
+            if(s->sample_num > s->next_parameters_and_state.preferred_start_sample)
+                s->start_sample = s->sample_num;
+            else
+                s->start_sample = s->next_parameters_and_state.preferred_start_sample;
             value = 0; // Value is 0, because we are starting the new period
             // from this point, and don't want to hear a little "pop" if we
             // went above zero from the previous period and back to zero for
@@ -113,16 +120,16 @@ float sines_get_next_sample(struct sines_state* s) {
                 ((float)(s->fade_end_sample - s->fade_start_sample)));
     }
     // This has been seen to be < 0... do we skip samples sometimes? CHECK_0_TO_POS_1(fade);
-    B31E_CLAMP(fade, 0, 1);
+    SINES_CLAMP(fade, 0, 1);
     value *= fade;
     
     CHECK_NEG_1_TO_POS_1(value);
-    B31E_CLAMP(value, -1, 1);
+    SINES_CLAMP(value, -1, 1);
     
     s->sample_num++;
     
     CHECK_NEG_1_TO_POS_1(value);
-    B31E_CLAMP(value, -1, 1);
+    SINES_CLAMP(value, -1, 1);
     
     return value;
 }
@@ -137,6 +144,7 @@ struct sines_state* sines_alloc(uint64_t samples_per_second) {
         s->last_value = 0;
         s->fade_start_sample = s->fade_end_sample = UINT64_DISTANT_FUTURE;
         s->next_parameters_and_state_flag = 0;
+        s->current_parameters_and_state.preferred_start_sample = 0;
         s->current_parameters_and_state.frequency = 0;
         s->current_parameters_and_state.amplitude_decay_constant = 0;
         s->current_parameters_and_state.velocity = 1.0;

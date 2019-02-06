@@ -24,30 +24,15 @@
  
  */
 
-#ifndef B31E_H
-#define B31E_H
+#ifndef SINES_H
+#define SINES_H
 #include <stdint.h>
-
-// BassAndDrumsFromSineWavesAndNoise
-// B1234567890123456789012345678901E -> sines
 
 struct sines_state;
 
-#define B31E_CLAMP(x,y,z) (x) = (((x) < (y)) ? (y) : (((x) > (z)) ? (z) : (x)))
-#define B31E_AMPLITUDE_DECAY_MIN 0
-#define B31E_AMPLITUDE_DECAY_MAX 25
-#define B31E_FOLLOW_OCTAVES_MIN -2
-#define B31E_FOLLOW_OCTAVES_MAX 8
-#define B31E_GAIN_MIN 0.0
-#define B31E_GAIN_MAX 1.0
-#define B31E_FREQUENCY_MIN 0.0
-#define B31E_FREQUENCY_MAX 10.0
-#define B31E_PCT_MIN 0
-#define B31E_PCT_MAX 100.0
-#define B31E_BOOL_MIN 0
-#define B31E_BOOL_MAX 1
-#define B31E_ECHO_MIN 0
-#define B31E_ECHO_MAX 0.1
+#define SINES_AMPLITUDE_DECAY_MIN 0
+#define SINES_AMPLITUDE_DECAY_MAX 25
+#define SINES_CLAMP(x,y,z) (x) = (((x) < (y)) ? (y) : (((x) > (z)) ? (z) : (x)))
 
 // There's no rewinding, the sines is just set up, then advance
 // one sample at a time.  To go again, just call
@@ -57,7 +42,8 @@ struct sines_state* sines_alloc(uint64_t samples_per_second);
 void sines_free(struct sines_state* s);
 
 void sines_trigger_bass(struct sines_state* s, float frequency_literal,
-                        float velocity, float amplitude_decay_constant);
+                        float velocity, float amplitude_decay_constant,
+                        float trigger_delay_seconds);
 
 void sines_mute_bass(struct sines_state* s);
 

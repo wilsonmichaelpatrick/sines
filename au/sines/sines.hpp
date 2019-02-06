@@ -22,6 +22,7 @@ private:
   int mOffset;
   int m_bass_note_number;
   float m_amplitude_decay_constant;
+  float m_trigger_delay_ms;
 };
 
 #endif
